@@ -2,6 +2,16 @@ require 'time'
 require 'fluent/plugin/input'
 require 'fluent/plugin/parser'
 require 'bunny'
+require 'zlib'
+require 'stringio'
+
+def gzip_inflate(string)
+  gz = Zlib::GzipReader.new(StringIO.new(string))    
+  uncompressed_string = gz.read
+  gz.close
+  uncompressed_string
+end
+
 
 module Fluent::Plugin
   ##
@@ -46,6 +56,7 @@ module Fluent::Plugin
     config_param :routing_key, :string, default: "#"                       # The routing key used to bind queue to exchange - # = matches all, * matches section (tag.*.info)
     config_param :include_headers, :bool, default: false
     config_param :auth_mechanism, :string, default: nil
+    config_param :gzip, :bool, default: false
 
     def configure(conf)
       conf['format'] ||= conf['payload_format'] # legacy
@@ -85,6 +96,10 @@ module Fluent::Plugin
       end
 
       q.subscribe do |delivery, meta, msg|
+        if @gzip
+            log.debug "Inflating gzip message"
+            msg = gzip_inflate(msg)
+        end
         log.debug "Recieved message #{msg}"
         log.debug "Recieved message  MetaData #{meta}"
         payload = parse_payload(msg, meta)

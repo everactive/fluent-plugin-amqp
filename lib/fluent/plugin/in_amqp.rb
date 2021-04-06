@@ -96,7 +96,7 @@ module Fluent::Plugin
         log.info "Binding #{@queue} to #{@exchange}, :routing_key => #{@routing_key}"
         q.bind(exchange=@exchange, routing_key: @routing_key)
       end
-
+        # 2do: manual acks
       q.subscribe do |delivery, meta, msg|
         if @gzip
             begin
@@ -108,6 +108,7 @@ module Fluent::Plugin
               record = { 'headers' => meta[:headers] }.merge(record)
               log.debug record
               router.emit_error_event(parse_tag(delivery, meta), parse_time(meta), record, e)
+              # here we should ack the message if the emit was successful
               next
             end
         end
@@ -120,6 +121,7 @@ module Fluent::Plugin
         payload = parse_payload(msg, meta)
         log.debug "Parsed Payload #{payload}"
         router.emit(parse_tag(delivery, meta), parse_time(meta), payload)
+        # here we should ack the message if the emit was successful
       end
     end # AMQPInput#run
 

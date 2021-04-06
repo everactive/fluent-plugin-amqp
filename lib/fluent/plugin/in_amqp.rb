@@ -2,6 +2,17 @@ require 'time'
 require 'fluent/plugin/input'
 require 'fluent/plugin/parser'
 require 'bunny'
+require 'zlib'
+require 'stringio'
+require "base64"
+
+def gzip_inflate(string)
+  gz = Zlib::GzipReader.new(StringIO.new(string))    
+  uncompressed_string = gz.read
+  gz.close
+  uncompressed_string
+end
+
 
 module Fluent::Plugin
   ##
@@ -46,6 +57,8 @@ module Fluent::Plugin
     config_param :routing_key, :string, default: "#"                       # The routing key used to bind queue to exchange - # = matches all, * matches section (tag.*.info)
     config_param :include_headers, :bool, default: false
     config_param :auth_mechanism, :string, default: nil
+    config_param :gzip, :bool, default: false
+    config_param :b64encode_payload, :bool, default: false
 
     def configure(conf)
       conf['format'] ||= conf['payload_format'] # legacy
@@ -83,13 +96,32 @@ module Fluent::Plugin
         log.info "Binding #{@queue} to #{@exchange}, :routing_key => #{@routing_key}"
         q.bind(exchange=@exchange, routing_key: @routing_key)
       end
-
+        # 2do: manual acks
       q.subscribe do |delivery, meta, msg|
+        if @gzip
+            begin
+              log.debug "Inflating gzip message"
+              msg = gzip_inflate(msg)
+            rescue => e
+              log.debug "Error in gzip payload"
+              record = { 'message' => Base64.strict_encode64(msg) }
+              record = { 'headers' => meta[:headers] }.merge(record)
+              log.debug record
+              router.emit_error_event(parse_tag(delivery, meta), parse_time(meta), record, e)
+              # here we should ack the message if the emit was successful
+              next
+            end
+        end
+        if @b64encode_payload
+            log.debug "B64 encoding payload"
+            msg = Base64.strict_encode64(msg)
+        end
         log.debug "Recieved message #{msg}"
         log.debug "Recieved message  MetaData #{meta}"
         payload = parse_payload(msg, meta)
         log.debug "Parsed Payload #{payload}"
         router.emit(parse_tag(delivery, meta), parse_time(meta), payload)
+        # here we should ack the message if the emit was successful
       end
     end # AMQPInput#run
 
